@@ -1,8 +1,10 @@
 package esi
 
 import (
-	"net/http"
+	"context"
 	"regexp"
+
+	"github.com/fastly/compute-sdk-go/fsthttp"
 )
 
 const escape = "<!--esi"
@@ -17,7 +19,7 @@ type escapeTag struct {
 	*baseTag
 }
 
-func (e *escapeTag) Process(b []byte, req *http.Request) ([]byte, int) {
+func (e *escapeTag) Process(ctx context.Context, b []byte, req *fsthttp.Request) ([]byte, int) {
 	closeIdx := closeEscape.FindIndex(b)
 
 	if closeIdx == nil {

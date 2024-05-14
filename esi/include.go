@@ -3,10 +3,13 @@ package esi
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"regexp"
+	"time"
+
+	"github.com/fastly/compute-sdk-go/fsthttp"
 )
 
 const include = "include"
@@ -58,13 +61,13 @@ func (i *includeTag) loadAttributes(b []byte) error {
 	return nil
 }
 
-func sanitizeURL(u string, reqURL *url.URL) string {
+func sanitizeURL(u string, reqURL *url.URL) *url.URL {
 	parsed, _ := url.Parse(u)
 
-	return reqURL.ResolveReference(parsed).String()
+	return reqURL.ResolveReference(parsed)
 }
 
-func addHeaders(headers []string, req *http.Request, rq *http.Request) {
+func addHeaders(headers []string, req *fsthttp.Request, rq *fsthttp.Request) {
 	for _, h := range headers {
 		v := req.Header.Get(h)
 		if v != "" {
@@ -73,11 +76,35 @@ func addHeaders(headers []string, req *http.Request, rq *http.Request) {
 	}
 }
 
+var backends = map[string]struct{}{}
+
+func (i *includeTag) doFetch(ctx context.Context, r *fsthttp.Request, src string) (*fsthttp.Response, error) {
+	fetchURL := sanitizeURL(src, r.URL)
+
+	backendName := fmt.Sprintf("this_%s", fetchURL.Host)
+
+	// Don't register backends multiple times
+	if _, ok := backends[backendName]; !ok {
+		opts := fsthttp.NewBackendOptions()
+		opts.HostOverride(fetchURL.Host)
+		opts.ConnectTimeout(time.Duration(1) * time.Second)
+		opts.FirstByteTimeout(time.Duration(15) * time.Second)
+		opts.BetweenBytesTimeout(time.Duration(10) * time.Second)
+		opts.UseSSL(true)
+		fsthttp.RegisterDynamicBackend(backendName, fetchURL.Host, opts)
+
+		backends[backendName] = struct{}{}
+	}
+
+	r.URL = fetchURL
+	return r.Send(ctx, backendName)
+}
+
 // Input (e.g. include src="https://domain.com/esi-include" alt="https://domain.com/alt-esi-include" />)
 // With or without the alt
 // With or without a space separator before the closing
 // With or without the quotes around the src/alt value.
-func (i *includeTag) Process(b []byte, req *http.Request) ([]byte, int) {
+func (i *includeTag) Process(ctx context.Context, b []byte, req *fsthttp.Request) ([]byte, int) {
 	closeIdx := closeInclude.FindIndex(b)
 
 	if closeIdx == nil {
@@ -89,27 +116,10 @@ func (i *includeTag) Process(b []byte, req *http.Request) ([]byte, int) {
 		return nil, len(b)
 	}
 
-	rq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, sanitizeURL(i.src, req.URL), nil)
-	addHeaders(headersSafe, req, rq)
-
-	if rq.URL.Scheme == req.URL.Scheme && rq.URL.Host == req.URL.Host {
-		addHeaders(headersUnsafe, req, rq)
-	}
-
-	client := &http.Client{}
-	response, err := client.Do(rq)
-	req = rq
+	response, err := i.doFetch(ctx, req, i.src)
 
 	if (err != nil || response.StatusCode >= 400) && i.alt != "" {
-		rq, _ = http.NewRequestWithContext(context.Background(), http.MethodGet, sanitizeURL(i.alt, req.URL), nil)
-		addHeaders(headersSafe, req, rq)
-
-		if rq.URL.Scheme == req.URL.Scheme && rq.URL.Host == req.URL.Host {
-			addHeaders(headersUnsafe, req, rq)
-		}
-
-		response, err = client.Do(rq)
-		req = rq
+		response, err = i.doFetch(ctx, req, i.alt)
 
 		if !i.silent && (err != nil || response.StatusCode >= 400) {
 			return nil, len(b)
@@ -125,7 +135,7 @@ func (i *includeTag) Process(b []byte, req *http.Request) ([]byte, int) {
 	defer response.Body.Close()
 	_, _ = io.Copy(&buf, response.Body)
 
-	b = Parse(buf.Bytes(), req)
+	b = Parse(ctx, buf.Bytes(), req)
 
 	return b, i.length
 }

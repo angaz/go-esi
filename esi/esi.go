@@ -1,7 +1,9 @@
 package esi
 
 import (
-	"net/http"
+	"context"
+
+	"github.com/fastly/compute-sdk-go/fsthttp"
 )
 
 func findTagName(b []byte) Tag {
@@ -81,7 +83,7 @@ func ReadToTag(next []byte, pointer int) (startTagPosition, esiPointer int, t Ta
 	return
 }
 
-func Parse(b []byte, req *http.Request) []byte {
+func Parse(ctx context.Context, b []byte, req *fsthttp.Request) []byte {
 	pointer := 0
 
 	for pointer < len(b) {
@@ -107,7 +109,7 @@ func Parse(b []byte, req *http.Request) []byte {
 			esiPointer += 7
 		}
 
-		res, p := t.Process(next[esiPointer:], req)
+		res, p := t.Process(ctx, next[esiPointer:], req)
 		esiPointer += p
 
 		b = append(b[:pointer], append(next[:tagIdx[0]], append(res, next[esiPointer:]...)...)...)

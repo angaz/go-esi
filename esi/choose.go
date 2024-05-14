@@ -1,8 +1,10 @@
 package esi
 
 import (
-	"net/http"
+	"context"
 	"regexp"
+
+	"github.com/fastly/compute-sdk-go/fsthttp"
 )
 
 const choose = "choose"
@@ -32,7 +34,7 @@ type chooseTag struct {
 //
 // </esi:choose>
 // ).
-func (c *chooseTag) Process(b []byte, req *http.Request) ([]byte, int) {
+func (c *chooseTag) Process(ctx context.Context, b []byte, req *fsthttp.Request) ([]byte, int) {
 	found := closeChoose.FindIndex(b)
 	if found == nil {
 		return nil, len(b)
@@ -45,7 +47,7 @@ func (c *chooseTag) Process(b []byte, req *http.Request) ([]byte, int) {
 
 	for _, v := range tagIdxs {
 		if validateTest(v[1], req) {
-			res = Parse(v[2], req)
+			res = Parse(ctx, v[2], req)
 
 			return res, c.length
 		}
@@ -53,7 +55,7 @@ func (c *chooseTag) Process(b []byte, req *http.Request) ([]byte, int) {
 
 	tagIdx := otherwiseRg.FindSubmatch(b)
 	if tagIdx != nil {
-		res = Parse(tagIdx[1], req)
+		res = Parse(ctx, tagIdx[1], req)
 	}
 
 	return res, c.length
