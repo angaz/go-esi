@@ -2,6 +2,7 @@ package esi
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -49,6 +50,8 @@ func parseVariables(b []byte, req *fsthttp.Request) string {
 		// case httpUserAgent:
 		// 	return req.UserAgent()
 		case httpQueryString:
+			fmt.Println("query string")
+			fmt.Println(req.URL.RawQuery, string(interprets[3]))
 			if q := req.URL.Query().Get(string(interprets[3])); q != "" {
 				return q
 			}

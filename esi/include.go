@@ -81,7 +81,7 @@ var backends = map[string]struct{}{}
 func (i *includeTag) doFetch(ctx context.Context, r *fsthttp.Request, src string) (*fsthttp.Response, error) {
 	fetchURL := sanitizeURL(src, r.URL)
 
-	backendName := fmt.Sprintf("this_%s", fetchURL.Host)
+	backendName := fmt.Sprintf("dynamic_%s", fetchURL.Host)
 
 	// Don't register backends multiple times
 	if _, ok := backends[backendName]; !ok {
@@ -91,13 +91,21 @@ func (i *includeTag) doFetch(ctx context.Context, r *fsthttp.Request, src string
 		opts.FirstByteTimeout(time.Duration(15) * time.Second)
 		opts.BetweenBytesTimeout(time.Duration(10) * time.Second)
 		opts.UseSSL(true)
-		fsthttp.RegisterDynamicBackend(backendName, fetchURL.Host, opts)
+		_, err := fsthttp.RegisterDynamicBackend(backendName, fetchURL.Host, opts)
+		if err != nil {
+			fmt.Println("register backend:", err)
+		}
 
 		backends[backendName] = struct{}{}
 	}
 
-	r.URL = fetchURL
-	return r.Send(ctx, backendName)
+	req := r.Clone()
+	req.URL = fetchURL
+
+	fmt.Println("backend:", backendName)
+	fmt.Println("req:", req.URL)
+
+	return req.Send(ctx, backendName)
 }
 
 // Input (e.g. include src="https://domain.com/esi-include" alt="https://domain.com/alt-esi-include" />)
@@ -117,9 +125,15 @@ func (i *includeTag) Process(ctx context.Context, b []byte, req *fsthttp.Request
 	}
 
 	response, err := i.doFetch(ctx, req, i.src)
+	if err != nil {
+		fmt.Println("fetch error:", err)
+	}
 
 	if (err != nil || response.StatusCode >= 400) && i.alt != "" {
 		response, err = i.doFetch(ctx, req, i.alt)
+		if err != nil {
+			fmt.Println("alt fetch error:", err)
+		}
 
 		if !i.silent && (err != nil || response.StatusCode >= 400) {
 			return nil, len(b)
